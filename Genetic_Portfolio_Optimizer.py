@@ -18,7 +18,7 @@ np.random.seed(SEED)
 
 # === DATA COLLECTION ===
 def fetch_price_data(tickers, start, end):
-    df = yf.download(tickers, start=start, end=end)['Adj Close']
+    df = yf.download(tickers, start=start, end=end, auto_adjust=False)['Adj Close']
     return df.dropna()
 
 price_data = fetch_price_data(TICKERS, START_DATE, END_DATE)
