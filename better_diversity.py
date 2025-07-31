@@ -127,8 +127,78 @@ def evaluate_learning_curve(returns, val_mu, val_cov, test_mu, test_cov, sizes=[
 
     return sizes, train_scores, val_scores, test_scores, returns_list, risks, sharpes, weights_list
 
+def plot_efficient_frontier(mu, cov, lam_values=np.linspace(0, 1, 25)):
+    returns = []
+    risks = []
+
+    for lam in lam_values:
+        weights, _, _, _ = run_genetic_algorithm(mu, cov, mu, cov, mu, cov, lam=lam)
+        ret = np.dot(weights, mu)
+        risk = np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
+        returns.append(ret)
+        risks.append(risk)
+
+    # Sort the (risk, return) pairs by risk for a smooth curve
+    sorted_pairs = sorted(zip(risks, returns))
+    sorted_risks, sorted_returns = zip(*sorted_pairs)
+
+    # Plot
+    plt.figure(figsize=(8, 6))
+    plt.plot(sorted_risks, sorted_returns, marker='o')
+    plt.title("Efficient Frontier (Train Set)")
+    plt.xlabel("Volatility (Risk)")
+    plt.ylabel("Expected Return")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+def sensitivity_analysis(mu, cov, val_mu, val_cov, test_mu, test_cov, param='lambda'):
+    values = np.linspace(0.1, 0.9, 9)
+    fitness_vals = []
+    returns = []
+    risks = []
+    sharpes = []
+
+    for v in values:
+        if param == 'lambda':
+            weights, _, _, _ = run_genetic_algorithm(mu, cov, val_mu, val_cov, test_mu, test_cov, lam=v)
+        elif param == 'mutation':
+            global MUTATION_RATE
+            old_rate = MUTATION_RATE
+            MUTATION_RATE = v
+            weights, _, _, _ = run_genetic_algorithm(mu, cov, val_mu, val_cov, test_mu, test_cov)
+            MUTATION_RATE = old_rate
+        else:
+            raise ValueError("param must be 'lambda' or 'mutation'")
+
+        ret = np.dot(weights, test_mu)
+        risk = np.sqrt(np.dot(weights.T, np.dot(test_cov, weights)))
+        sharpe = ret / risk if risk > 0 else 0
+
+        fit = fitness(weights, test_mu, test_cov, LAMBDA)
+        fitness_vals.append(fit)
+        returns.append(ret)
+        risks.append(risk)
+        sharpes.append(sharpe)
+
+        print(f"{param} = {v:.2f} → Return: {ret:.4f}, Risk: {risk:.4f}, Sharpe: {sharpe:.3f}, Fitness: {fit:.5f}")
+
+    # Plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(values, returns, label="Return")
+    plt.plot(values, risks, label="Risk")
+    plt.plot(values, sharpes, label="Sharpe Ratio")
+    plt.plot(values, fitness_vals, label="Fitness")
+    plt.xlabel(param.capitalize())
+    plt.ylabel("Metric Value")
+    plt.title(f"Sensitivity Analysis: {param.capitalize()}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 # === GA LOOP ===
-def run_genetic_algorithm(mu_train, cov_train, mu_val, cov_val, mu_test, cov_test):
+def run_genetic_algorithm(mu_train, cov_train, mu_val, cov_val, mu_test, cov_test, lam=LAMBDA):
     num_assets = len(TICKERS)
     population = initialize_population(POP_SIZE, num_assets)
 
@@ -137,14 +207,14 @@ def run_genetic_algorithm(mu_train, cov_train, mu_val, cov_val, mu_test, cov_tes
     best_test_fitnesses = []
 
     for gen in range(NUM_GENERATIONS):
-        scores = np.array([fitness(ind, mu_train, cov_train, LAMBDA) for ind in population])
+        scores = np.array([fitness(ind, mu_train, cov_train, lam) for ind in population])
         best_index = np.argmax(scores)
         best_individual = population[best_index]
 
         # Record fitness for the best individual on all three sets
-        best_train_fitnesses.append(fitness(best_individual, mu_train, cov_train, LAMBDA))
-        best_val_fitnesses.append(fitness(best_individual, mu_val, cov_val, LAMBDA))
-        best_test_fitnesses.append(fitness(best_individual, mu_test, cov_test, LAMBDA))
+        best_train_fitnesses.append(fitness(best_individual, mu_train, cov_train, lam))
+        best_val_fitnesses.append(fitness(best_individual, mu_val, cov_val, lam))
+        best_test_fitnesses.append(fitness(best_individual, mu_test, cov_test, lam))
 
         # Selection and new generation
         selected = tournament_selection(population, scores)
@@ -157,7 +227,7 @@ def run_genetic_algorithm(mu_train, cov_train, mu_val, cov_val, mu_test, cov_tes
         population = np.array(next_gen)
 
     # Final optimal portfolio
-    final_scores = np.array([fitness(ind, mu_train, cov_train, LAMBDA) for ind in population])
+    final_scores = np.array([fitness(ind, mu_train, cov_train, lam) for ind in population])
     best_index = np.argmax(final_scores)
     best_weights = population[best_index]
 
@@ -206,17 +276,23 @@ sizes, train_curve, val_curve, test_curve, returns_list, risks, sharpes, weights
     returns.iloc[:train_end], val_mu, val_cov, test_mu, test_cov
 )
 
-# === PLOT RISK vs RETURN ===
+# === PLOT FIXED RISK vs RETURN ===
+# Sort by risk for a smooth frontier-like curve
+sorted_points = sorted(zip(risks, returns_list, sizes))
+sorted_risks, sorted_returns, sorted_sizes = zip(*sorted_points)
+
 plt.figure(figsize=(8, 6))
-plt.plot(risks, returns_list, marker='o')
-for i, s in enumerate(sizes):
-    plt.text(risks[i], returns_list[i], f"{int(s*100)}%")
+plt.plot(sorted_risks, sorted_returns, marker='o')
+for r, ret, s in zip(sorted_risks, sorted_returns, sorted_sizes):
+    plt.text(r, ret, f"{int(s*100)}%", fontsize=9)
+
 plt.title("Risk vs Return (Test Set)")
 plt.xlabel("Volatility (Risk)")
 plt.ylabel("Expected Return")
 plt.grid(True)
 plt.tight_layout()
 plt.show()
+
 
 # === PLOT SHARPE RATIO CURVE ===
 plt.figure(figsize=(8, 6))
@@ -255,4 +331,13 @@ best_risk = risks[best_idx]
 best_sharpe = sharpes[best_idx]
 
 print(f"Return: {best_return:.5f}, Risk: {best_risk:.5f}, Sharpe Ratio: {best_sharpe:.3f}")
+
+plot_efficient_frontier(train_mu, train_cov)
+
+# Sensitivity to λ
+sensitivity_analysis(train_mu, train_cov, val_mu, val_cov, test_mu, test_cov, param='lambda')
+
+# Sensitivity to mutation rate
+sensitivity_analysis(train_mu, train_cov, val_mu, val_cov, test_mu, test_cov, param='mutation')
+
 
