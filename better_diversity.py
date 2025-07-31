@@ -2,6 +2,7 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
 
 # === CONFIG ===
 TICKERS = ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU', 'AGG', 'TLT']
@@ -25,6 +26,26 @@ price_data = fetch_price_data(TICKERS, START_DATE, END_DATE)
 returns = price_data.pct_change().dropna()
 expected_returns = returns.mean()
 cov_matrix = returns.cov()
+
+# === SPLIT RETURNS INTO TRAIN/VAL/TEST ===
+n = len(returns)
+train_end = int(0.70 * n)
+val_end = int(0.85 * n)
+
+train_returns = returns.iloc[:train_end]
+val_returns   = returns.iloc[train_end:val_end]
+test_returns  = returns.iloc[val_end:]
+
+# Compute mean and covariance matrices
+train_mu = train_returns.mean()
+train_cov = train_returns.cov()
+
+val_mu = val_returns.mean()
+val_cov = val_returns.cov()
+
+test_mu = test_returns.mean()
+test_cov = test_returns.cov()
+
 
 def entropy(weights):
     return -np.sum(weights * np.log(weights + 1e-8))
@@ -64,20 +85,69 @@ def mutate(weights, rate=0.1):
         weights /= np.sum(weights)
     return weights
 
+def evaluate_learning_curve(returns, val_mu, val_cov, test_mu, test_cov, sizes=[0.2, 0.3, 0.4, 0.5, 0.6, 0.7]):
+    train_scores = []
+    val_scores = []
+    test_scores = []
+    returns_list = []
+    risks = []
+    sharpes = []
+    weights_list = []
+
+    for frac in sizes:
+        n = int(frac * len(returns))
+        train_returns = returns.iloc[:n]
+        mu = train_returns.mean()
+        cov = train_returns.cov()
+
+        weights, _, _, _ = run_genetic_algorithm(mu, cov, val_mu, val_cov, test_mu, test_cov)
+
+        # Fitness
+        train_score = fitness(weights, mu, cov, LAMBDA)
+        val_score = fitness(weights, val_mu, val_cov, LAMBDA)
+        test_score = fitness(weights, test_mu, test_cov, LAMBDA)
+
+        # Risk/Return/Sharpe on test set
+        expected_ret = np.dot(weights, test_mu)
+        variance = np.dot(weights.T, np.dot(test_cov, weights))
+        std_dev = np.sqrt(variance)
+        sharpe = expected_ret / std_dev if std_dev > 0 else 0
+
+        # Store
+        train_scores.append(train_score)
+        val_scores.append(val_score)
+        test_scores.append(test_score)
+        returns_list.append(expected_ret)
+        risks.append(std_dev)
+        sharpes.append(sharpe)
+        weights_list.append(weights)
+
+        print(f"Training size: {n} → Train: {train_score:.5f}, Val: {val_score:.5f}, Test: {test_score:.5f}, "
+              f"Return: {expected_ret:.5f}, Risk: {std_dev:.5f}, Sharpe: {sharpe:.3f}")
+
+    return sizes, train_scores, val_scores, test_scores, returns_list, risks, sharpes, weights_list
+
 # === GA LOOP ===
-def run_genetic_algorithm():
+def run_genetic_algorithm(mu_train, cov_train, mu_val, cov_val, mu_test, cov_test):
     num_assets = len(TICKERS)
     population = initialize_population(POP_SIZE, num_assets)
-    best_fitnesses = []
+
+    best_train_fitnesses = []
+    best_val_fitnesses = []
+    best_test_fitnesses = []
 
     for gen in range(NUM_GENERATIONS):
-        scores = np.array([fitness(ind, expected_returns, cov_matrix, LAMBDA) for ind in population])
-        best_fitnesses.append(np.max(scores))
+        scores = np.array([fitness(ind, mu_train, cov_train, LAMBDA) for ind in population])
+        best_index = np.argmax(scores)
+        best_individual = population[best_index]
 
-        # Selection
+        # Record fitness for the best individual on all three sets
+        best_train_fitnesses.append(fitness(best_individual, mu_train, cov_train, LAMBDA))
+        best_val_fitnesses.append(fitness(best_individual, mu_val, cov_val, LAMBDA))
+        best_test_fitnesses.append(fitness(best_individual, mu_test, cov_test, LAMBDA))
+
+        # Selection and new generation
         selected = tournament_selection(population, scores)
-
-        # Crossover & Mutation
         next_gen = []
         for i in range(0, POP_SIZE, 2):
             p1, p2 = selected[i], selected[(i+1) % POP_SIZE]
@@ -86,23 +156,103 @@ def run_genetic_algorithm():
             next_gen.extend([child1, child2])
         population = np.array(next_gen)
 
-    # Final best solution
-    final_scores = np.array([fitness(ind, expected_returns, cov_matrix, LAMBDA) for ind in population])
+    # Final optimal portfolio
+    final_scores = np.array([fitness(ind, mu_train, cov_train, LAMBDA) for ind in population])
     best_index = np.argmax(final_scores)
     best_weights = population[best_index]
-    return best_weights, best_fitnesses
+
+    return best_weights, best_train_fitnesses, best_val_fitnesses, best_test_fitnesses
 
 # === RUN & PLOT ===
-optimal_weights, fitness_curve = run_genetic_algorithm()
+optimal_weights, train_fitness, val_fitness, test_fitness = run_genetic_algorithm(
+    train_mu, train_cov, val_mu, val_cov, test_mu, test_cov
+)
 
 print("\nOptimal Portfolio Allocation:")
 for ticker, weight in zip(TICKERS, optimal_weights):
     print(f"{ticker}: {weight:.4f}")
 
-plt.plot(fitness_curve)
+# Evaluate on validation and test sets
+val_score = fitness(optimal_weights, val_mu, val_cov, LAMBDA)
+test_score = fitness(optimal_weights, test_mu, test_cov, LAMBDA)
+
+print(f"\nValidation Fitness: {val_score:.4f}")
+print(f"Test Fitness: {test_score:.4f}")
+
+# === Risk/Return Breakdown ===
+expected_return = np.dot(optimal_weights, test_mu)
+portfolio_risk = np.dot(optimal_weights.T, np.dot(test_cov, optimal_weights))
+
+print(f"\nRisk/Return Breakdown (on Test Set):")
+print(f"Expected Return: {expected_return:.4f}")
+print(f"Portfolio Risk (Variance): {portfolio_risk:.6f}")
+print(f"Portfolio Std. Dev. (Volatility): {np.sqrt(portfolio_risk):.4f}")
+
+# === PLOT FITNESS CURVES ===
+plt.figure(figsize=(10, 6))
+plt.plot(train_fitness, label="Train Fitness")
+plt.plot(val_fitness, label="Validation Fitness")
+plt.plot(test_fitness, label="Test Fitness")
 plt.title("Fitness over Generations")
 plt.xlabel("Generation")
 plt.ylabel("Fitness")
+plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.show()
+
+# === LEARNING CURVE ===
+sizes, train_curve, val_curve, test_curve, returns_list, risks, sharpes, weights_list = evaluate_learning_curve(
+    returns.iloc[:train_end], val_mu, val_cov, test_mu, test_cov
+)
+
+# === PLOT RISK vs RETURN ===
+plt.figure(figsize=(8, 6))
+plt.plot(risks, returns_list, marker='o')
+for i, s in enumerate(sizes):
+    plt.text(risks[i], returns_list[i], f"{int(s*100)}%")
+plt.title("Risk vs Return (Test Set)")
+plt.xlabel("Volatility (Risk)")
+plt.ylabel("Expected Return")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# === PLOT SHARPE RATIO CURVE ===
+plt.figure(figsize=(8, 6))
+plt.plot([int(s * 100) for s in sizes], sharpes, marker='o')
+plt.title("Sharpe Ratio vs Training Set Size")
+plt.xlabel("Training Set Size (%)")
+plt.ylabel("Sharpe Ratio (Test Set)")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# === PLOT LEARNING CURVE ===
+plt.figure(figsize=(10, 6))
+x = [int(s * 100) for s in sizes]
+plt.plot(x, train_curve, marker='o', label="Train Fitness")
+plt.plot(x, val_curve, marker='o', label="Validation Fitness")
+plt.plot(x, test_curve, marker='o', label="Test Fitness")
+plt.title("Learning Curve: Fitness vs Training Set Size")
+plt.xlabel("Training Set Size (%)")
+plt.ylabel("Fitness")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+best_idx = np.argmax(val_curve)
+best_weights = weights_list[best_idx]
+best_size = sizes[best_idx]
+
+print(f"\n🏆 Best Portfolio Found Using {int(best_size * 100)}% Training Data")
+for ticker, w in zip(TICKERS, best_weights):
+    print(f"{ticker}: {w:.4f}")
+
+best_return = returns_list[best_idx]
+best_risk = risks[best_idx]
+best_sharpe = sharpes[best_idx]
+
+print(f"Return: {best_return:.5f}, Risk: {best_risk:.5f}, Sharpe Ratio: {best_sharpe:.3f}")
+
