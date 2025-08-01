@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 # === CONFIG ===
-TICKERS = ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU', 'AGG', 'TLT']
-START_DATE = '2020-01-01'
+TICKERS = ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU', 'SHY', 'TLT', 'IEF', 'GLD']
+START_DATE = '1970-01-01'
 END_DATE = '2024-12-31'
 NUM_GENERATIONS = 100
 POP_SIZE = 50
@@ -46,11 +46,10 @@ val_cov = val_returns.cov()
 test_mu = test_returns.mean()
 test_cov = test_returns.cov()
 
-
 def entropy(weights):
     return -np.sum(weights * np.log(weights + 1e-8))
 
-def fitness(weights, mu, cov, lam, entropy_weight=0.01):
+def fitness(weights, mu, cov, lam, entropy_weight=0.0001):
     ret = np.dot(weights, mu)
     risk = np.dot(weights.T, np.dot(cov, weights))
     div_penalty = entropy(weights)
@@ -340,4 +339,45 @@ sensitivity_analysis(train_mu, train_cov, val_mu, val_cov, test_mu, test_cov, pa
 # Sensitivity to mutation rate
 sensitivity_analysis(train_mu, train_cov, val_mu, val_cov, test_mu, test_cov, param='mutation')
 
+lambda_values = [0.0, 0.5, 0.9]
+portfolio_dict = {}
+
+for lam in lambda_values:
+    weights, *_ = run_genetic_algorithm(train_mu, train_cov, val_mu, val_cov, test_mu, test_cov, lam=lam)
+    portfolio_dict[lam] = weights
+
+TICKER_TO_SECTOR = {
+    'XLC': 'Comm. Services',
+    'XLY': 'Cons. Discretionary',
+    'XLP': 'Cons. Staples',
+    'XLE': 'Energy',
+    'XLF': 'Financials',
+    'XLV': 'Health Care',
+    'XLI': 'Industrials',
+    'XLB': 'Materials',
+    'XLRE': 'Real Estate',
+    'XLK': 'Technology',
+    'XLU': 'Utilities',
+    'SHY': 'Short Bonds',
+    'TLT': 'Long Bonds',
+    'IEF': 'Int. Bonds',
+    'GLD': 'Gold'
+}
+
+x = np.arange(len(TICKERS))
+width = 0.25
+plt.figure(figsize=(14, 6))
+
+for i, lam in enumerate(lambda_values):
+    offset = (i - 1) * width
+    plt.bar(x + offset, portfolio_dict[lam], width, label=f"λ = {lam}")
+
+sector_labels = [TICKER_TO_SECTOR[t] for t in TICKERS]
+plt.xticks(x, sector_labels, rotation=45, ha='right')
+plt.ylabel("Weight Allocation")
+plt.title("Portfolio Allocation Comparison for Different λ Values")
+plt.legend()
+plt.grid(True, linestyle='--', alpha=0.5)
+plt.tight_layout()
+plt.show()
 
