@@ -3,6 +3,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import os
+
+OUTPUT_DIR = "plots"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # === CONFIG ===
 TICKERS = ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU', 'SHY', 'TLT', 'IEF', 'GLD']
@@ -149,7 +153,9 @@ def plot_efficient_frontier(mu, cov, lam_values=np.linspace(0, 1, 25)):
     plt.ylabel("Expected Return")
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(OUTPUT_DIR, "Efficient_Frontier_(Train Set).png"))
+    plt.close()
+
 
 def sensitivity_analysis(mu, cov, val_mu, val_cov, test_mu, test_cov, param='lambda'):
     values = np.linspace(0.1, 0.9, 9)
@@ -194,7 +200,8 @@ def sensitivity_analysis(mu, cov, val_mu, val_cov, test_mu, test_cov, param='lam
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(OUTPUT_DIR, f"Sensitivity Analysis:_{param.capitalize()}.png"))
+    plt.close()
 
 # === GA LOOP ===
 def run_genetic_algorithm(mu_train, cov_train, mu_val, cov_val, mu_test, cov_test, lam=LAMBDA):
@@ -268,7 +275,9 @@ plt.ylabel("Fitness")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "Fitness_over_Generations.png"))
+plt.close()
+
 
 # === LEARNING CURVE ===
 sizes, train_curve, val_curve, test_curve, returns_list, risks, sharpes, weights_list = evaluate_learning_curve(
@@ -290,7 +299,9 @@ plt.xlabel("Volatility (Risk)")
 plt.ylabel("Expected Return")
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "Risk_vs_Return_(Test Set).png"))
+plt.close()
+
 
 
 # === PLOT SHARPE RATIO CURVE ===
@@ -301,7 +312,9 @@ plt.xlabel("Training Set Size (%)")
 plt.ylabel("Sharpe Ratio (Test Set)")
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "Sharpe_Ratio_vs_Training_Set_Size.png"))
+plt.close()
+
 
 # === PLOT LEARNING CURVE ===
 plt.figure(figsize=(10, 6))
@@ -315,7 +328,8 @@ plt.ylabel("Fitness")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "Learning Curve:_Fitness_vs_Training_Set_Size.png"))
+plt.close()
 
 best_idx = np.argmax(val_curve)
 best_weights = weights_list[best_idx]
